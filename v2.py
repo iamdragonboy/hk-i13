@@ -5,6 +5,7 @@ import sys
 import os
 import re
 import time
+import shlex
 import concurrent.futures
 import discord
 from discord.ext import commands, tasks
@@ -21,6 +22,7 @@ RAM_LIMIT = '64g'
 SERVER_LIMIT = 1
 database_file = 'database.txt'
 PUBLIC_IP = '138.68.79.95'
+YOUR_BOT_ID = '1396853238350876682'
 
 # Admin user IDs - add your admin user IDs here
 ADMIN_IDS = [1258646055860568094,1159037240622723092]  # Replace with actual admin IDs
@@ -310,21 +312,34 @@ class ConfirmView(View):
         # Disable all buttons
         for child in self.children:
             child.disabled = True
+
 @bot.event
 async def on_ready():
-    try:
-        with open("database.txt", "r") as f:
-            vps_count = len([line for line in f if line.strip()])
-    except FileNotFoundError:
-        vps_count = 0
+    async def update_status():
+        while True:
+            try:
+                with open("database.txt", "r") as f:
+                    count = len([line for line in f if line.strip()])
+            except FileNotFoundError:
+                count = 0
 
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name=f"VPS | : {vps_count} | Gamerzhacker"
-        )
-    )
-    print(f"✅ Bot is ready as {bot.user}, watching {vps_count} VPS")
+            await bot.change_presence(
+                activity=discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name=f"VPS Deploy | Total: {count} | Gamerzhacker"
+                )
+            )
+            await asyncio.sleep(300)  # update every 5 mins
+
+    # Sync commands
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
+
+    bot.loop.create_task(update_status())
+    print(f"✅ Bot Ready: {bot.user}")
     
 @tasks.loop(seconds=5)
 async def change_status():
@@ -980,8 +995,8 @@ async def deploy_with_os(interaction, os_type, ram, cpu, user_id, user, containe
         dm_embed.add_field(name="💾 RAM Allocation", value=f"{ram}GB", inline=True)
         dm_embed.add_field(name="🔥 CPU Cores", value=f"{cpu} cores", inline=True)
         dm_embed.add_field(name="🧊 Container Name", value=container_name, inline=False)
-        dm_embed.add_field(name="💾 Storage", value=f"10000 GB (Shared storage)", inline=True)
-        dm_embed.add_field(name="🔒 Password", value="hk-i9", inline=False)
+        dm_embed.add_field(name="💾 Storage", value=f"1TB (Shared storage)", inline=True)
+        dm_embed.add_field(name="🔒 Password", value="root", inline=False)
         
         dm_embed.set_footer(text="Keep this information safe and private!")
         
@@ -993,7 +1008,7 @@ async def deploy_with_os(interaction, os_type, ram, cpu, user_id, user, containe
             
             # Public success message
             success_embed = discord.Embed(
-                title="**✅ Create VPS hk-i10 Successfully**",
+                title=" **✅ Create VPS Dm Successfully** ",
                 description=f"** 🎉 VPS instance has been created for <@{user_id}>. They should check their DMs for connection details.**",
                 color=0x00ff00
             )
@@ -1247,12 +1262,11 @@ async def ping(interaction: discord.Interaction):
         color=0x00ff00
     )
     await interaction.response.send_message(embed=embed)
-
 @bot.tree.command(name="help", description="❓ Shows the help message")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title="**🌟 VPS Bot Help**",
-        description="** Here are all the available commands:**",
+        description="**Here are all the available commands:**",
         color=0x00aaff
     )
     
@@ -1271,7 +1285,10 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(name="/port-add <container_name> <port>", value="Forward a port", inline=True)
     embed.add_field(name="/port-http <container_name> <port>", value="Forward HTTP traffic", inline=True)
     embed.add_field(name="/ping", value="Check bot latency", inline=True)
-    embed.add_field(name="/botinfo", value="Check bot Developer", inline=True)
+    embed.add_field(name="/create", value="Claim a VPS reward by invite or boost", inline=True)
+    embed.add_field(name="/manage", value="Manage your VPS or shared ones", inline=True)
+    embed.add_field(name="/nodes", value="Show your VPS instances with status and resources", inline=True)
+    # Note: /botinfo is listed but not implemented; consider removing or implementing it
     
     # Admin commands
     if interaction.user.id in ADMIN_IDS:
@@ -1284,6 +1301,11 @@ async def help_command(interaction: discord.Interaction):
         embed.add_field(name="/node", value="View system resource usage", inline=True)
         embed.add_field(name="/nodedmin", value="List all VPS instances with details", inline=True)
         embed.add_field(name="/delete-all", value="Delete all VPS instances", inline=True)
+        embed.add_field(name="/suspendvps <usertag>", value="Suspend all VPS of a user", inline=True)
+        embed.add_field(name="/unsuspendvps <usertag>", value="Unsuspend all VPS of a user", inline=True)
+        embed.add_field(name="/sendvps", value="Send VPS details to a user via DM", inline=True)
+        embed.add_field(name="/sharedipv4 <container_name> <usertag>", value="Setup port forward in VPS and DM SSH info", inline=True)
+        embed.add_field(name="/reinstall <usertag> <os>", value="Reinstall a user's VPS with selected OS", inline=True)
     
     await interaction.response.send_message(embed=embed)
 
@@ -1418,38 +1440,72 @@ async def manage(interaction: discord.Interaction):
     servers = get_user_servers(userid)
     shared = []
 
-    with open("access.txt", "r") as f:
-        for line in f:
-            vps, uid = line.strip().split("|")
-            if uid == userid:
-                shared.append(vps)
+    try:
+        with open("access.txt", "r") as f:
+            for line in f:
+                try:
+                    vps, uid = line.strip().split("|")
+                    if uid == userid:
+                        shared.append(vps)
+                except ValueError:
+                    continue
+    except FileNotFoundError:
+        pass
 
     if not servers and not shared:
         return await interaction.response.send_message("❌ You have no VPS or shared access.", ephemeral=True)
 
-    all_vps = servers + shared
-    container_name = all_vps[0].split('|')[0] if '|' in all_vps[0] else all_vps[0]
+    container_names = [line.split('|')[1] for line in servers if '|' in line] + shared
 
-    # VPS status
-    running = os.popen(f"docker inspect -f '{{{{.State.Running}}}}' {container_name}").read().strip()
-    status = "🟢 Online" if running == "true" else "🔴 Offline"
-    color = 0x2ecc71 if running == "true" else 0xe74c3c
+    class VPSSelect(discord.ui.Select):
+        def __init__(self):
+            options = [
+                discord.SelectOption(label=name, value=name) for name in container_names
+            ]
+            super().__init__(placeholder="Select a VPS to manage", options=options)
 
-    embed = discord.Embed(
-        title=f"🖥️ Managing VPS: `{container_name}`",
-        description=f"**Status:** {status}",
-        color=color
-    )
-    embed.set_image(url="https://www.imghippo.com/i/bRzC6045UZ.png")
-    embed.set_thumbnail(url="https://www.imghippo.com/i/PXAV9041Yyw.png")
+        async def callback(self, interaction2):
+            container_name = shlex.quote(self.values[0])  # Sanitize input
+            stats = get_container_stats(container_name)
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                    capture_output=True, text=True, check=True
+                )
+                running = result.stdout.strip()
+                status = "🟢 Online" if running == "true" else "🔴 Offline"
+                color = 0x2ecc71 if running == "true" else 0xe74c3c
+            except subprocess.CalledProcessError:
+                status = "🔴 Unknown"
+                color = 0xe74c3c
+
+            ram_info = stats["memory"]
+            cpu_info = stats["cpu"]
+            disk_info = "Shared / 10TB"
+
+            embed = discord.Embed(
+                title=f"🖥️ Manage VPS: `{container_name}`",
+                description=f"**Status:** {status}\n**RAM:** {ram_info} | **CPU:** {cpu_info} | **Disk:** {disk_info}",
+                color=color
+            )
+            embed.set_image(url="https://www.imghippo.com/i/bRzC6045UZ.png")
+            embed.set_footer(text="VPS Dashboard")
+
+            await interaction2.response.edit_message(embed=embed, view=ManageButtons(container_name))
 
     class CmdModal(discord.ui.Modal, title="📥 Run Command on VPS"):
         command = discord.ui.TextInput(label="Enter your command", style=discord.TextStyle.paragraph)
 
         async def on_submit(self, interaction2):
-            output = os.popen(f'docker exec {container_name} bash -c "{self.command.value}"').read()
-            output = output[:1900] + '...' if len(output) > 1900 else output
-            await interaction2.response.send_message(f"📤 Output:\n```{output}```", ephemeral=True)
+            try:
+                output = subprocess.run(
+                    ["docker", "exec", container_name, "bash", "-c", self.command.value],
+                    capture_output=True, text=True, check=True
+                )
+                output = output.stdout[:1900] + '...' if len(output.stdout) > 1900 else output.stdout
+                await interaction2.response.send_message(f"📤 Output:\n```{output}```", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await interaction2.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
     class OSSelect(discord.ui.Select):
         def __init__(self):
@@ -1462,8 +1518,7 @@ async def manage(interaction: discord.Interaction):
 
         async def callback(self, interaction2):
             os_choice = self.values[0]
-            # 🔁 Replace this with your reinstall logic
-            await interaction2.response.send_message(f"📀 Reinstalling with `{os_choice}` (demo only)", ephemeral=True)
+            await interaction2.response.send_message(f"📀 Reinstalling VPS with `{os_choice}` (demo)", ephemeral=True)
 
     class ReinstallView(discord.ui.View):
         def __init__(self):
@@ -1471,47 +1526,50 @@ async def manage(interaction: discord.Interaction):
             self.add_item(OSSelect())
 
     class ManageButtons(discord.ui.View):
-        def __init__(self):
+        def __init__(self, container_name):
             super().__init__(timeout=None)
+            self.container_name = container_name
 
         @discord.ui.button(label="✅ Start", style=discord.ButtonStyle.success)
         async def start(self, i, b): 
-            os.system(f"docker start {container_name}")
-            await i.response.send_message("✅ VPS started.", ephemeral=True)
+            try:
+                subprocess.run(["docker", "start", self.container_name], check=True, capture_output=True, text=True)
+                await i.response.send_message("✅ VPS started.", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await i.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
         @discord.ui.button(label="🛑 Stop", style=discord.ButtonStyle.danger)
         async def stop(self, i, b): 
-            os.system(f"docker stop {container_name}")
-            await i.response.send_message("🛑 VPS stopped.", ephemeral=True)
+            try:
+                subprocess.run(["docker", "stop", self.container_name], check=True, capture_output=True, text=True)
+                await i.response.send_message("🛑 VPS stopped.", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await i.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
         @discord.ui.button(label="🔁 Restart", style=discord.ButtonStyle.primary)
         async def restart(self, i, b): 
-            os.system(f"docker restart {container_name}")
-            await i.response.send_message("🔁 VPS restarted.", ephemeral=True)
+            try:
+                subprocess.run(["docker", "restart", self.container_name], check=True, capture_output=True, text=True)
+                await i.response.send_message("🔁 VPS restarted.", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await i.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
         @discord.ui.button(label="📊 Status", style=discord.ButtonStyle.secondary)
         async def status(self, i, b): 
-            running = os.popen(f"docker inspect -f '{{{{.State.Running}}}}' {container_name}").read().strip()
-            stat = "🟢 Online" if running == "true" else "🔴 Offline"
-            await i.response.send_message(f"📶 VPS is: **{stat}**", ephemeral=True)
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "-f", "{{.State.Running}}", self.container_name],
+                    capture_output=True, text=True, check=True
+                )
+                running = result.stdout.strip()
+                stat = "🟢 Online" if running == "true" else "🔴 Offline"
+                await i.response.send_message(f"📶 VPS is: **{stat}**", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await i.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
         @discord.ui.button(label="🖥️ Run CMD", style=discord.ButtonStyle.secondary)
         async def cmd(self, i, b): 
             await i.response.send_modal(CmdModal())
-
-        @discord.ui.button(label="🤝 Share VPS", style=discord.ButtonStyle.secondary)
-        async def share(self, i, b): 
-            await i.response.send_message("✏️ Enter user ID to share VPS with:", ephemeral=True)
-
-            def check(msg): return msg.author.id == i.user.id and msg.channel == i.channel
-            try:
-                msg = await bot.wait_for("message", timeout=30, check=check)
-                uid = msg.content.strip()
-                with open("access.txt", "a") as f:
-                    f.write(f"{container_name}|{uid}\n")
-                await i.followup.send(f"✅ VPS shared with <@{uid}>.", ephemeral=True)
-            except:
-                await i.followup.send("❌ Timed out or invalid input.", ephemeral=True)
 
         @discord.ui.button(label="🔁 Reinstall OS", style=discord.ButtonStyle.secondary)
         async def reinstall(self, i, b): 
@@ -1519,72 +1577,50 @@ async def manage(interaction: discord.Interaction):
 
         @discord.ui.button(label="🗑️ Delete VPS", style=discord.ButtonStyle.danger)
         async def delete(self, i, b): 
-            os.system(f"docker stop {container_name}")
-            os.system(f"docker rm {container_name}")
-            await i.response.send_message(f"🗑️ `{container_name}` deleted.", ephemeral=True)
+            try:
+                subprocess.run(["docker", "stop", self.container_name], check=True, capture_output=True, text=True)
+                subprocess.run(["docker", "rm", self.container_name], check=True, capture_output=True, text=True)
+                await i.response.send_message(f"🗑️ `{self.container_name}` deleted.", ephemeral=True)
+            except subprocess.CalledProcessError as e:
+                await i.response.send_message(f"❌ Error: {e.stderr}", ephemeral=True)
 
-    await interaction.response.send_message(embed=embed, view=ManageButtons(), ephemeral=True)
+    if len(container_names) == 1:
+        container_name = shlex.quote(container_names[0])
+        stats = get_container_stats(container_name)
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
+                capture_output=True, text=True, check=True
+            )
+            running = result.stdout.strip()
+            status = "🟢 Online" if running == "true" else "🔴 Offline"
+            color = 0x2ecc71 if running == "true" else 0xe74c3c
+        except subprocess.CalledProcessError:
+            status = "🔴 Unknown"
+            color = 0xe74c3c
 
-# === /myshares ===
-@bot.tree.command(name="myshares", description="📋 List all users you've shared VPS access with")
-async def myshares(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    if not os.path.exists(ACCESS_FILE):
-        await interaction.response.send_message("You haven't shared any VPS access yet.", ephemeral=True)
-        return
+        ram_info = stats["memory"]
+        cpu_info = stats["cpu"]
+        disk_info = "Shared / 10TB"
 
-    owned_vps = [line.split('|')[0] for line in get_user_servers(user_id)]
-    shared_data = {}
-    with open(ACCESS_FILE, 'r') as f:
-        for line in f:
-            container, shared_user = line.strip().split('|')
-            if container in owned_vps:
-                shared_data.setdefault(container, []).append(shared_user)
+        embed = discord.Embed(
+            title=f"🖥️ Manage VPS: `{container_name}`",
+            description=f"**Status:** {status}\n**RAM:** {ram_info} | **CPU:** {cpu_info} | **Disk:** {disk_info}",
+            color=color
+        )
+        embed.set_image(url="https://www.imghippo.com/i/bRzC6045UZ.png")
+        embed.set_footer(text="VPS Dashboard")
 
-    if not shared_data:
-        await interaction.response.send_message("You haven’t shared access to any VPS.", ephemeral=True)
-        return
-
-    embed = discord.Embed(title="👥 Shared VPS Access", color=0x00aaff)
-    for vps, users in shared_data.items():
-        display = "\n".join(f"<@{uid}>" for uid in users)
-        embed.add_field(name=vps, value=display or "No users", inline=False)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-# === /revokeshareall ===
-@bot.tree.command(name="revokeshareall", description="🧹 Remove all shared access from a VPS")
-@app_commands.describe(container_name="Your VPS name")
-async def revokeshareall(interaction: discord.Interaction, container_name: str):
-    user_id = str(interaction.user.id)
-    if not has_access(user_id, container_name):
-        await interaction.response.send_message("❌ You don’t have access to this VPS.", ephemeral=True)
-        return
-
-    remove_all_shares(container_name)
-    await interaction.response.send_message(f"✅ All users removed from `{container_name}`.", ephemeral=True)
-
-
-# === /sharesof (Admin only) ===
-@bot.tree.command(name="sharesof", description="🔍 Admin: Check shared users of a user's VPS")
-@app_commands.describe(userid="Target user ID")
-async def sharesof(interaction: discord.Interaction, userid: str):
-    if interaction.user.id not in ADMIN_IDS:
-        await interaction.response.send_message("❌ Only admins can use this command.", ephemeral=True)
-        return
-
-    owned_vps = [line.split('|')[0] for line in get_user_servers(userid)]
-    if not owned_vps:
-        await interaction.response.send_message("This user doesn't own any VPS.", ephemeral=True)
-        return
-
-    embed = discord.Embed(title=f"📦 VPS Shares of <@{userid}>", color=0x00aaff)
-    for vps in owned_vps:
-        shared = get_shared_users(vps)
-        embed.add_field(name=vps, value="\n".join(f"<@{u}>" for u in shared) or "No shares", inline=False)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=ManageButtons(container_name), ephemeral=True)
+    else:
+        embed = discord.Embed(
+            title="🖥️ Select a VPS to Manage",
+            description="You have multiple VPS instances. Please select one to manage.",
+            color=0x00aaff
+        )
+        view = discord.ui.View()
+        view.add_item(VPSSelect())
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="suspendvps", description="❌ Admin: Suspend all VPS of a user")
 @app_commands.describe(usertag="The user whose VPS you want to suspend")
@@ -1624,7 +1660,6 @@ async def unsuspendvps(interaction: discord.Interaction, usertag: discord.User):
         os.system(f"docker unpause {container}")
 
     await interaction.response.send_message(f"✅ Unsuspended VPS: `{', '.join(containers)}`", ephemeral=True)
-
 
 @bot.tree.command(name="sendvps", description="👑 Admin: Send VPS details to a user via DM")
 @app_commands.describe(
@@ -1685,10 +1720,10 @@ async def sendvps(
             color=0xff0000
         )
         await interaction.response.send_message(embed=error)
-        
-@bot.tree.command(name="shareipv4", description="🌐 Admin: Setup port forward in VPS and DM SSH info")
+
+@bot.tree.command(name="sharedipv4", description="🌐 Admin: Setup port forward in VPS and DM SSH info")
 @app_commands.describe(container_name="VPS container name", usertag="User to send SSH info")
-async def shareipv4(interaction: discord.Interaction, container_name: str, usertag: discord.User):
+async def sharedipv4(interaction: discord.Interaction, container_name: str, usertag: discord.User):
     if interaction.user.id not in ADMIN_IDS:
         await interaction.response.send_message("❌ Only admins can use this command.", ephemeral=True)
         return
@@ -1730,5 +1765,97 @@ async def shareipv4(interaction: discord.Interaction, container_name: str, usert
         await interaction.followup.send(f"✅ Create Vps `{ip_port}` DM sent to {usertag.mention}", ephemeral=True)
     except:
         await interaction.followup.send("❌ Could not DM the user.", ephemeral=True)
+
+@bot.tree.command(name="reinstall", description="🔁 Reinstall a user's VPS with selected OS")
+@app_commands.describe(usertag="User to reinstall VPS for", os="OS template (ubuntu-22.04 / debian-12)")
+async def reinstall(interaction: discord.Interaction, usertag: discord.Member, os: str):
+    if str(interaction.user.id) not in ADMIN:  # use your admin list or role check
+        return await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
+
+    userid = str(usertag.id)
+    vps_list = get_user_servers(userid)
+    if not vps_list:
+        return await interaction.response.send_message("❌ No VPS found for this user.", ephemeral=True)
+
+    container_name = vps_list[0].split('|')[0] if '|' in vps_list[0] else vps_list[0]
+
+    # Check if Dockerfile exists
+    dockerfile_path = f"os_templates/{os}.Dockerfile"
+    if not os.path.exists(dockerfile_path):
+        return await interaction.response.send_message("❌ OS template not found.", ephemeral=True)
+
+    await interaction.response.send_message(f"🛠️ Reinstalling `{container_name}` with `{os}`...", ephemeral=True)
+
+    try:
+        os.system(f"docker stop {container_name}")
+        os.system(f"docker rm {container_name}")
+        os.system(f"docker build -t {container_name}-img -f {dockerfile_path} .")
+        os.system(f"docker run -d --name {container_name} {container_name}-img")
+    except Exception as e:
+        return await interaction.followup.send(f"❌ Reinstall failed: {e}", ephemeral=True)
+
+    try:
+        await usertag.send(f"✅ Your VPS `{container_name}` has been reinstalled with `{os}`.")
+    except:
+        pass
+
+    await interaction.followup.send(f"✅ Reinstalled VPS `{container_name}` for {usertag.mention} with `{os}`.", ephemeral=True)
+
+@bot.tree.command(name="nodes", description="📊 Show your VPS instances with status and resources")
+async def nodes(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    servers = get_user_servers(user_id)
+    await interaction.response.defer(ephemeral=True)
+
+    if not servers:
+        embed = discord.Embed(
+            title="📦 Your VPS Instances",
+            description="You don't have any VPS instances.", 
+            color=0xff5555
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+
+    def make_embed():
+        embed = discord.Embed(
+            title="🖥️ VPS Instance List",
+            description=f"Showing {len(servers)} instance(s) for <@{user_id}>",
+            color=0x00aaff
+        )
+        for server in servers:
+            parts = server.split('|')
+            container_name = parts[0]
+            # get status
+            try:
+                running = os.popen(f"docker inspect -f '{{{{.State.Running}}}}' {container_name}").read().strip()
+                status_str = "🟢 Online" if running == "true" else "🔴 Offline"
+            except:
+                status_str = "🔴 Unknown"
+            # placeholder resource pulls (replace with real functions if available)
+            # Example using docker stats could be added here
+            ram_info = "N/A"
+            cpu_info = "Ryzen 9"  # if static branding; otherwise pull actual
+            disk_info = "Shared / 10TB"
+
+            embed.add_field(
+                name=f"{container_name} ({status_str})",
+                value=f"**RAM:** {ram_info}\n**CPU:** {cpu_info}\n**Disk:** {disk_info}",
+                inline=False
+            )
+        return embed
+
+    class RefreshView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="Refresh", style=discord.ButtonStyle.primary)
+        async def refresh(self, interaction2: discord.Interaction, button: discord.ui.Button):
+            new_servers = get_user_servers(user_id)
+            nonlocal servers
+            servers = new_servers
+            await interaction2.response.edit_message(embed=make_embed(), view=self)
+
+    view = RefreshView()
+    await interaction.followup.send(embed=make_embed(), view=view, ephemeral=True)
 
 bot.run(TOKEN)
