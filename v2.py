@@ -1685,7 +1685,7 @@ async def sendvps(
     if interaction.user.id not in ADMIN_IDS:
         embed = discord.Embed(
             title="❌ Access Denied",
-            description="Only Mrsdbd admins can use this command.",
+            description="Only Gamerzhacker admins can use this command.",
             color=0xff0000
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
