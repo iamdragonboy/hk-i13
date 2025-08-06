@@ -1921,19 +1921,16 @@ async def nodes(interaction: discord.Interaction):
     await interaction.followup.send(embed=make_embed(servers), view=ManageButtons(container_names[0]), ephemeral=False)
 
 class ManageView(ui.View):
-    def __init__(self, container_name):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.container = container_name
 
-    @ui.button(label="Start", style=discord.ButtonStyle.success)
-    async def start(self, interaction: Interaction, button: ui.Button):
-        os.system(f"docker start {self.container}")
-        await interaction.response.send_message(f"🟢 VPS `{self.container}` started.", ephemeral=True)
+    @ui.button(label="Start", style=discord.ButtonStyle.success, emoji="▶️")
+    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Starting VPS...")
 
-    @ui.button(label="Stop", style=discord.ButtonStyle.danger)
-    async def stop(self, interaction: Interaction, button: ui.Button):
-        os.system(f"docker stop {self.container}")
-        await interaction.response.send_message(f"🔴 VPS `{self.container}` stopped.", ephemeral=True)
+    @ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="⛔")
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Stopping VPS...")
 
     @ui.button(label="Restart", style=discord.ButtonStyle.primary)
     async def restart(self, interaction: Interaction, button: ui.Button):
