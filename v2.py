@@ -13,7 +13,7 @@ import docker
 import asyncio
 from discord import app_commands
 from discord.ui import Button, View, Select
-import string
+import string import ??ghjdd
 from datetime import datetime, timedelta
 from typing import Optional, Literal
 
@@ -1920,155 +1920,133 @@ async def nodes(interaction: discord.Interaction):
     container_names = [shlex.quote(line.split('|')[1]) for line in servers if '|' in line]
     await interaction.followup.send(embed=make_embed(servers), view=ManageButtons(container_names[0]), ephemeral=False)
 
-# File paths
-REGISTER_FILE = "register_tokens.txt"
-ADMIN_FILE = "admin_list.txt"
-ALLOW_FILE = "allow_register.txt"
 
-def generate_id(prefix, length=6):
-    return prefix + ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+class ManageVPSView(ui.View):
+    def __init__(self, container_name: str, owner_id: int):
+        super().__init__(timeout=None)
+        self.container_name = container_name
+        self.owner_id = owner_id
 
-def is_admin(user_id):
-    if not os.path.exists(ADMIN_FILE):
-        return False
-    with open(ADMIN_FILE) as f:
-        return str(user_id) in [line.strip() for line in f.readlines()]
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ You do not own this VPS!", ephemeral=True)
+            return False
+        return True
 
-def is_allowed():
-    if not os.path.exists(ALLOW_FILE):
-        return False
-    with open(ALLOW_FILE) as f:
-        return f.read().strip() == "yes"
-
-def mark_used(vpsid):
-    lines = []
-    with open(REGISTER_FILE, "r") as f:
-        for line in f:
-            if line.startswith(vpsid):
-                parts = line.strip().split("|")
-                parts[-1] = "used"
-                lines.append("|".join(parts))
-            else:
-                lines.append(line.strip())
-    with open(REGISTER_FILE, "w") as f:
-        f.write("\n".join(lines) + "\n")
-
-def check_valid_token(vpsid, vpstoken):
-    if not os.path.exists(REGISTER_FILE):
-        return None
-    with open(REGISTER_FILE) as f:
-        for line in f:
-            parts = line.strip().split("|")
-            if len(parts) >= 5 and parts[0] == vpsid and parts[1] == vpstoken and parts[4] == "unused":
-                return parts[2]  # return user ID
-    return None
-
-def save_token(vpsid, vpstoken, user_id):
-    with open(REGISTER_FILE, "a") as f:
-        f.write(f"{vpsid}|{vpstoken}|{user_id}|null|unused\n")
-
-class VPSRegister(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-
-    @app_commands.command(name="allowregister", description="✅ Allow users to use /registervps and /loginvps (admin only)")
-    async def allow_register(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user.id):
-            await interaction.response.send_message("❌ Only admins can use this.", ephemeral=True)
-            return
-        with open(ALLOW_FILE, "w") as f:
-            f.write("yes")
-        await interaction.response.send_message("✅ Allowed /registervps and /loginvps for all users.", ephemeral=True)
-
-    @app_commands.command(name="addadmin_bot", description="🔐 Add a new admin by user ID (admin only)")
-    async def addadmin_bot(self, interaction: discord.Interaction, userid: str):
-        if not is_admin(interaction.user.id):
-            await interaction.response.send_message("❌ Only admins can add admins.", ephemeral=True)
-            return
-        with open(ADMIN_FILE, "a") as f:
-            f.write(f"{userid}\n")
-        await interaction.response.send_message(f"✅ Added <@{userid}> as admin.", ephemeral=True)
-
-    @app_commands.command(name="createid", description="🧪 Create VPS ID/token and send to user (admin only)")
-    async def createid(self, interaction: discord.Interaction, vpsid: str, vpstoken: str, usertag: discord.User):
-        if not is_admin(interaction.user.id):
-            await interaction.response.send_message("❌ Only admins can create ID/token.", ephemeral=True)
-            return
-        save_token(vpsid, vpstoken, usertag.id)
+    @ui.button(label="Start", style=discord.ButtonStyle.success)
+    async def start_vps(self, interaction: discord.Interaction, button: ui.Button):
         try:
-            await usertag.send(f"🔐 Your VPS Access:\n**VPSID**: `{vpsid}`\n**Token**: `{vpstoken}`\nUse `/useid` to activate.")
-        except:
-            pass
-        await interaction.response.send_message("✅ Sent token to user.", ephemeral=True)
+            docker_client.containers.get(self.container_name).start()
+            await interaction.response.send_message(f"✅ VPS `{self.container_name}` started!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error starting VPS: {e}", ephemeral=True)
 
-    @app_commands.command(name="registervps", description="📝 Register for free VPS")
-    async def registervps(self, interaction: discord.Interaction):
-        if not is_allowed():
-            await interaction.response.send_message("❌ Registration is currently disabled.", ephemeral=True)
-            return
+    @ui.button(label="Stop", style=discord.ButtonStyle.danger)
+    async def stop_vps(self, interaction: discord.Interaction, button: ui.Button):
+        try:
+            docker_client.containers.get(self.container_name).stop()
+            await interaction.response.send_message(f"🛑 VPS `{self.container_name}` stopped!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error stopping VPS: {e}", ephemeral=True)
 
-        class RegModal(discord.ui.Modal, title="Register Free VPS"):
-            email = discord.ui.TextInput(label="Enter your email", placeholder="example@gmail.com")
-            password = discord.ui.TextInput(label="Enter your password", style=discord.TextStyle.short)
+    @ui.button(label="Restart", style=discord.ButtonStyle.primary)
+    async def restart_vps(self, interaction: discord.Interaction, button: ui.Button):
+        try:
+            docker_client.containers.get(self.container_name).restart()
+            await interaction.response.send_message(f"🔄 VPS `{self.container_name}` restarted!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error restarting VPS: {e}", ephemeral=True)
 
-            async def on_submit(self, modal_interaction: discord.Interaction):
-                vpsid = generate_id("vps")
-                vpstoken = generate_id("tok")
-                save_token(vpsid, vpstoken, interaction.user.id)
+    @ui.button(label="Regenerate SSH", style=discord.ButtonStyle.secondary)
+    async def regenerate_ssh(self, interaction: discord.Interaction, button: ui.Button):
+        try:
+            container = docker_client.containers.get(self.container_name)
+            new_pass = "Pass" + str(discord.utils.utcnow().timestamp())[-6:]
+            container.exec_run(f"echo 'root:{new_pass}' | chpasswd")
+            ip = container.attrs['NetworkSettings']['IPAddress']
+            port = 22
+            await interaction.user.send(
+                f"🔑 **New SSH Info for {self.container_name}:**\n```ssh root@{ip} -p {port}\nPassword: {new_pass}```"
+            )
+            await interaction.response.send_message("✅ SSH password regenerated and sent to DM!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error regenerating SSH: {e}", ephemeral=True)
 
-                class ConfirmView(discord.ui.View):
-                    @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
-                    async def yes(self, i: discord.Interaction, b):
-                        try:
-                            await interaction.user.send(
-                                f"✅ Successfully Registered VPS:\n"
-                                f"**Email**: `{self.email}`\n"
-                                f"**Password**: `{self.password}`\n"
-                                f"**VPSID**: `{vpsid}`\n"
-                                f"**Token**: `{vpstoken}`"
-                            )
-                        except:
-                            pass
-                        await i.response.send_message("✅ Check your DMs for VPS info.", ephemeral=True)
+    @ui.button(label="Get SSH Info", style=discord.ButtonStyle.blurple)
+    async def ssh_info(self, interaction: discord.Interaction, button: ui.Button):
+        try:
+            container = docker_client.containers.get(self.container_name)
+            ip = container.attrs['NetworkSettings']['IPAddress']
+            port = 22
+            ssh_pass = "StoredOrGeneratedPass"  # <-- yahan tumhare /deploy ka password variable lagana hai
+            await interaction.response.send_message(
+                f"📡 **SSH Command:**\n```ssh root@{ip} -p {port}\nPassword: {ssh_pass}```",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error fetching SSH info: {e}", ephemeral=True)
 
-                    @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
-                    async def no(self, i: discord.Interaction, b):
-                        await i.response.send_message("❌ Cancelled registration.", ephemeral=True)
+@bot.tree.command(name="manage", description="Manage your VPS")
+async def manage(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
 
-                await modal_interaction.response.send_message(
-                    f"Confirm registration for `{self.email}`?", view=ConfirmView(), ephemeral=True
+    user_id = str(interaction.user.id)
+    owned_vps = []
+
+    try:
+        with open("database.txt", "r") as f:
+            for line in f:
+                data = line.strip().split("|")
+                if data[1] == user_id:
+                    owned_vps.append(data[0])
+    except FileNotFoundError:
+        pass
+
+    if not owned_vps:
+        await interaction.followup.send("❌ You have no VPS linked to your account.", ephemeral=True)
+        return
+
+    if len(owned_vps) == 1:
+        container_name = owned_vps[0]
+        container = docker_client.containers.get(container_name)
+        status = "🟢 Online" if container.status == "running" else "🔴 Offline"
+        ram = container.attrs["HostConfig"]["Memory"] // (1024**3)
+        cpu = container.attrs["HostConfig"]["NanoCpus"] / 1e9
+        disk = "Unknown"
+
+        embed = discord.Embed(
+            title=f"⚙ VPS Manager — {container_name}",
+            description=f"**Status:** {status}\n**RAM:** {ram} GB\n**CPU:** {cpu} Cores\n**Disk:** {disk}",
+            color=discord.Color.green() if container.status == "running" else discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed, view=ManageVPSView(container_name, interaction.user.id), ephemeral=True)
+
+    else:
+        options = [discord.SelectOption(label=name, value=name) for name in owned_vps]
+
+        class VPSSelect(ui.Select):
+            def __init__(self):
+                super().__init__(placeholder="Select your VPS...", options=options)
+
+            async def callback(self, select_interaction: discord.Interaction):
+                container_name = self.values[0]
+                container = docker_client.containers.get(container_name)
+                status = "🟢 Online" if container.status == "running" else "🔴 Offline"
+                ram = container.attrs["HostConfig"]["Memory"] // (1024**3)
+                cpu = container.attrs["HostConfig"]["NanoCpus"] / 1e9
+                disk = "Unknown"
+                embed = discord.Embed(
+                    title=f"⚙ VPS Manager — {container_name}",
+                    description=f"**Status:** {status}\n**RAM:** {ram} GB\n**CPU:** {cpu} Cores\n**Disk:** {disk}",
+                    color=discord.Color.green() if container.status == "running" else discord.Color.red()
                 )
+                await select_interaction.response.send_message(embed=embed, view=ManageVPSView(container_name, interaction.user.id), ephemeral=True)
 
-        await interaction.response.send_modal(RegModal())
+        class VPSSelectView(ui.View):
+            def __init__(self):
+                super().__init__(timeout=None)
+                self.add_item(VPSSelect())
 
-    @app_commands.command(name="useid", description="🔑 Use a VPS ID + Token to unlock deploy")
-    async def useid(self, interaction: discord.Interaction, vpsid: str, vpstoken: str):
-        valid = check_valid_token(vpsid, vpstoken)
-        if not valid:
-            await interaction.response.send_message("❌ Invalid or already used.", ephemeral=True)
-            return
-        if str(interaction.user.id) != valid:
-            await interaction.response.send_message("❌ This token is not for you.", ephemeral=True)
-            return
-        mark_used(vpsid)
-        await interaction.response.send_message("✅ Token accepted! You can now use `/deploy` to launch your VPS.", ephemeral=True)
-
-    @app_commands.command(name="loginvps", description="🔐 Login to your VPS panel account")
-    async def loginvps(self, interaction: discord.Interaction, email: str, password: str, vpsid: str, vpstoken: str):
-        if not is_allowed():
-            await interaction.response.send_message("❌ Login is disabled.", ephemeral=True)
-            return
-        valid = check_valid_token(vpsid, vpstoken)
-        if not valid:
-            await interaction.response.send_message("❌ Invalid credentials or already used.", ephemeral=True)
-            return
-        if str(interaction.user.id) != valid:
-            await interaction.response.send_message("❌ Token mismatch with your account.", ephemeral=True)
-            return
-        mark_used(vpsid)
-        await interaction.response.send_message("✅ Logged in! Use `/deploy` to create your VPS (RAM 0, CPU 0, Expiry 2d).", ephemeral=True)
-
-async def setup(bot):
-    await bot.add_cog(VPSRegister(bot))
+        await interaction.followup.send("📌 Select a VPS to manage:", view=VPSSelectView(), ephemeral=True)
 
 bot.run(TOKEN)
