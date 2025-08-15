@@ -1920,7 +1920,6 @@ async def nodes(interaction: discord.Interaction):
     container_names = [shlex.quote(line.split('|')[1]) for line in servers if '|' in line]
     await interaction.followup.send(embed=make_embed(servers), view=ManageButtons(container_names[0]), ephemeral=False)
 
-
 class ManageVPSView(ui.View):
     def __init__(self, container_name: str, owner_id: int):
         super().__init__(timeout=None)
@@ -1939,7 +1938,7 @@ class ManageVPSView(ui.View):
             docker_client.containers.get(self.container_name).start()
             await interaction.response.send_message(f"✅ VPS `{self.container_name}` started!", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error starting VPS: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @ui.button(label="Stop", style=discord.ButtonStyle.danger)
     async def stop_vps(self, interaction: discord.Interaction, button: ui.Button):
@@ -1947,7 +1946,7 @@ class ManageVPSView(ui.View):
             docker_client.containers.get(self.container_name).stop()
             await interaction.response.send_message(f"🛑 VPS `{self.container_name}` stopped!", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error stopping VPS: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @ui.button(label="Restart", style=discord.ButtonStyle.primary)
     async def restart_vps(self, interaction: discord.Interaction, button: ui.Button):
@@ -1955,7 +1954,7 @@ class ManageVPSView(ui.View):
             docker_client.containers.get(self.container_name).restart()
             await interaction.response.send_message(f"🔄 VPS `{self.container_name}` restarted!", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error restarting VPS: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @ui.button(label="Regenerate SSH", style=discord.ButtonStyle.secondary)
     async def regenerate_ssh(self, interaction: discord.Interaction, button: ui.Button):
@@ -1966,11 +1965,11 @@ class ManageVPSView(ui.View):
             ip = container.attrs['NetworkSettings']['IPAddress']
             port = 22
             await interaction.user.send(
-                f"🔑 **New SSH Info for {self.container_name}:**\n```ssh root@{ip} -p {port}\nPassword: {new_pass}```"
+                f"🔑 **New SSH for {self.container_name}:**\n```ssh root@{ip} -p {port}\nPassword: {new_pass}```"
             )
-            await interaction.response.send_message("✅ SSH password regenerated and sent to DM!", ephemeral=True)
+            await interaction.response.send_message("✅ New SSH sent in DM!", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error regenerating SSH: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
     @ui.button(label="Get SSH Info", style=discord.ButtonStyle.blurple)
     async def ssh_info(self, interaction: discord.Interaction, button: ui.Button):
@@ -1978,13 +1977,30 @@ class ManageVPSView(ui.View):
             container = docker_client.containers.get(self.container_name)
             ip = container.attrs['NetworkSettings']['IPAddress']
             port = 22
-            ssh_pass = "StoredOrGeneratedPass"  # <-- yahan tumhare /deploy ka password variable lagana hai
+            ssh_pass = "StoredOrGeneratedPass"  # <-- yaha /deploy ka password logic lagana
             await interaction.response.send_message(
-                f"📡 **SSH Command:**\n```ssh root@{ip} -p {port}\nPassword: {ssh_pass}```",
+                f"📡 **SSH Info:**\n```ssh root@{ip} -p {port}\nPassword: {ssh_pass}```",
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error fetching SSH info: {e}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+
+    @ui.button(label="Refresh Status", style=discord.ButtonStyle.green)
+    async def refresh_status(self, interaction: discord.Interaction, button: ui.Button):
+        try:
+            container = docker_client.containers.get(self.container_name)
+            status = "🟢 Online" if container.status == "running" else "🔴 Offline"
+            ram = container.attrs["HostConfig"]["Memory"] // (1024**3)
+            cpu = container.attrs["HostConfig"]["NanoCpus"] / 1e9
+            disk = "Unknown"
+            embed = discord.Embed(
+                title=f"⚙ VPS Manager — {self.container_name}",
+                description=f"**Status:** {status}\n**RAM:** {ram} GB\n**CPU:** {cpu} Cores\n**Disk:** {disk}",
+                color=discord.Color.green() if container.status == "running" else discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="manage", description="Manage your VPS")
 async def manage(interaction: discord.Interaction):
@@ -1994,31 +2010,32 @@ async def manage(interaction: discord.Interaction):
     owned_vps = []
 
     try:
-        owned_vps = []
-           with open("database.txt", "r") as f:
-             for line in f:
-            cname, uid = line.strip().split("|")
-          if uid == str(interaction.user.id):
-            owned_vps.append(cname)
-            
+        with open("database.txt", "r") as f:
+            for line in f:
+                cname, uid = line.strip().split("|")
+                if uid == user_id:
+                    owned_vps.append(cname)
+    except FileNotFoundError:
+        pass
+
     if not owned_vps:
         await interaction.followup.send("❌ You have no VPS linked to your account.", ephemeral=True)
         return
 
     if len(owned_vps) == 1:
-        container_name = owned_vps[0]
-        container = docker_client.containers.get(container_name)
+        cname = owned_vps[0]
+        container = docker_client.containers.get(cname)
         status = "🟢 Online" if container.status == "running" else "🔴 Offline"
         ram = container.attrs["HostConfig"]["Memory"] // (1024**3)
         cpu = container.attrs["HostConfig"]["NanoCpus"] / 1e9
         disk = "Unknown"
 
         embed = discord.Embed(
-            title=f"⚙ VPS Manager — {container_name}",
+            title=f"⚙ VPS Manager — {cname}",
             description=f"**Status:** {status}\n**RAM:** {ram} GB\n**CPU:** {cpu} Cores\n**Disk:** {disk}",
             color=discord.Color.green() if container.status == "running" else discord.Color.red()
         )
-        await interaction.followup.send(embed=embed, view=ManageVPSView(container_name, interaction.user.id), ephemeral=True)
+        await interaction.followup.send(embed=embed, view=ManageVPSView(cname, interaction.user.id), ephemeral=True)
 
     else:
         options = [discord.SelectOption(label=name, value=name) for name in owned_vps]
@@ -2028,18 +2045,22 @@ async def manage(interaction: discord.Interaction):
                 super().__init__(placeholder="Select your VPS...", options=options)
 
             async def callback(self, select_interaction: discord.Interaction):
-                container_name = self.values[0]
-                container = docker_client.containers.get(container_name)
+                cname = self.values[0]
+                container = docker_client.containers.get(cname)
                 status = "🟢 Online" if container.status == "running" else "🔴 Offline"
                 ram = container.attrs["HostConfig"]["Memory"] // (1024**3)
                 cpu = container.attrs["HostConfig"]["NanoCpus"] / 1e9
                 disk = "Unknown"
                 embed = discord.Embed(
-                    title=f"⚙ VPS Manager — {container_name}",
+                    title=f"⚙ VPS Manager — {cname}",
                     description=f"**Status:** {status}\n**RAM:** {ram} GB\n**CPU:** {cpu} Cores\n**Disk:** {disk}",
                     color=discord.Color.green() if container.status == "running" else discord.Color.red()
                 )
-                await select_interaction.response.send_message(embed=embed, view=ManageVPSView(container_name, interaction.user.id), ephemeral=True)
+                await select_interaction.response.send_message(
+                    embed=embed,
+                    view=ManageVPSView(cname, interaction.user.id),
+                    ephemeral=True
+                )
 
         class VPSSelectView(ui.View):
             def __init__(self):
