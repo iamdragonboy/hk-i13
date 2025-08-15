@@ -11,9 +11,9 @@ import discord
 from discord.ext import commands, tasks
 import docker
 import asyncio
-from discord import app_commands
+from discord import app_commands, ui
 from discord.ui import Button, View, Select
-import string import ??ghjdd
+import string 
 from datetime import datetime, timedelta
 from typing import Optional, Literal
 
@@ -1994,14 +1994,13 @@ async def manage(interaction: discord.Interaction):
     owned_vps = []
 
     try:
-        with open("database.txt", "r") as f:
-            for line in f:
-                data = line.strip().split("|")
-                if data[1] == user_id:
-                    owned_vps.append(data[0])
-    except FileNotFoundError:
-        pass
-
+        owned_vps = []
+           with open("database.txt", "r") as f:
+             for line in f:
+            cname, uid = line.strip().split("|")
+          if uid == str(interaction.user.id):
+            owned_vps.append(cname)
+            
     if not owned_vps:
         await interaction.followup.send("❌ You have no VPS linked to your account.", ephemeral=True)
         return
