@@ -25,7 +25,7 @@ PUBLIC_IP = '138.68.79.95'
 YOUR_BOT_ID = '1396853238350876682'
 
 # Admin user IDs - add your admin user IDs here
-ADMIN_IDS = [1258646055860568094,1159037240622723092]  # Replace with actual admin IDs
+ADMIN_IDS = []  # Replace with actual admin IDs
 
 intents = discord.Intents.default()
 intents.messages = False
@@ -1655,7 +1655,7 @@ async def sharedipv4(interaction: discord.Interaction, container_name: str, user
         return
 
     ip_port = match.group(1)
-    ssh_cmd = f"ssh root@{ip_port.replace(':', ' -p ')}"
+    ssh_cmd = f"ssh root@{138.68.79.95_port.replace(':', ' -p ')}"
 
     # Step 3: Send to user
     embed = discord.Embed(
@@ -1666,7 +1666,7 @@ async def sharedipv4(interaction: discord.Interaction, container_name: str, user
     embed.set_thumbnail(url="https://www.imghippo.com/i/PXAV9041Yyw.png")
     embed.set_image(url="https://www.imghippo.com/i/bRzC6045UZ.png")
     embed.add_field(name="SSH Command", value=f"```{ssh_cmd}```", inline=False)
-    embed.set_footer(text="DragonCloud • Shared IPv4 Vps Access")
+    embed.set_footer(text="HACLER HOST • Shared IPv4 Vps Access")
 
     try:
         await usertag.send(embed=embed)
